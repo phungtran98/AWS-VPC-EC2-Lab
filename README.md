@@ -6,16 +6,26 @@ Dự án này triển khai một kiến trúc VPC hoàn chỉnh trên AWS sử d
 - **Public Subnet** (10.0.1.0/24) với EC2 instance cho ứng dụng
 - **Private Subnet** (10.0.2.0/24) với EC2 instance cho database
 - **Internet Gateway** để kết nối public subnet với internet
+- **NAT Gateway** để cho phép private subnet truy cập internet (outbound only)
 - **Route Tables** cho public và private subnet
 - **Security Groups** và **Network ACLs** cho bảo mật
 
 ## Kiến trúc
 
+### Sơ đồ kiến trúc với NAT Gateway
+
+![AWS VPC Architecture with NAT Gateway](docs/images/image.png)
+
+
+
 ```
 Region (us-east-1)
 └── VPC (10.0.0.0/16)
+    ├── Internet Gateway
+    │
     ├── Public Subnet (10.0.1.0/24)
     │   ├── App EC2 Instance
+    │   ├── NAT Gateway (với Elastic IP)
     │   ├── Security Group (App)
     │   ├── Network ACL (Public)
     │   └── Route Table (Public) → Internet Gateway
@@ -24,7 +34,7 @@ Region (us-east-1)
         ├── DB EC2 Instance
         ├── Security Group (DB)
         ├── Network ACL (Private)
-        └── Route Table (Private) → No Internet Access
+        └── Route Table (Private) → NAT Gateway (outbound internet)
 ```
 
 ## Yêu cầu
@@ -105,9 +115,14 @@ key_name = "my-key-pair"
 - Tạo và gắn Internet Gateway vào VPC
 - Cho phép public subnet kết nối với internet
 
-### 3. Route Tables (route-table.tf)
+### 3. NAT Gateway (nat-gateway.tf)
+- **NAT Gateway**: Được đặt trong public subnet với Elastic IP
+- Cho phép instances trong private subnet truy cập internet (outbound only)
+- Instances trong private subnet vẫn không thể nhận kết nối từ internet (vẫn private)
+
+### 4. Route Tables (route-table.tf)
 - **Public Route Table**: Route 0.0.0.0/0 → Internet Gateway
-- **Private Route Table**: Chỉ route nội bộ VPC (không có route ra internet)
+- **Private Route Table**: Route 0.0.0.0/0 → NAT Gateway (cho outbound internet access)
 
 ### 4. Security Groups (ec2.tf)
 - **App Security Group**: 
@@ -118,10 +133,18 @@ key_name = "my-key-pair"
   - Cho phép tất cả outbound traffic
 
 ### 5. Network ACLs (ec2.tf)
-- **Public NACL**: Cho phép HTTP, HTTPS, SSH và ephemeral ports
-- **Private NACL**: Chỉ cho phép traffic từ public subnet
+- **Public NACL**: 
+  - Inbound: HTTP (80), HTTPS (443), SSH (22), ephemeral ports (1024-65535), ICMP
+  - Outbound: Tất cả traffic
+- **Private NACL**: 
+  - Inbound: MySQL (3306), PostgreSQL (5432), SSH (22) từ public subnet, ephemeral ports từ VPC và internet (cho return traffic qua NAT Gateway), ICMP
+  - Outbound: Tất cả traffic
 
-### 6. EC2 Instances (ec2.tf)
+### 6. Internet Gateway (internet-gateway.tf)
+- Tạo và gắn Internet Gateway vào VPC
+- Cho phép public subnet kết nối với internet (bidirectional)
+
+### 7. EC2 Instances (ec2.tf)
 - **App Instance**: 
   - Trong public subnet, tự động cài đặt Apache web server
   - Có public IP để truy cập từ internet
@@ -153,6 +176,15 @@ ssh -i your-key.pem ec2-user@<app_public_ip>
 ssh ec2-user@<db_private_ip>
 ```
 
+4. **Test internet connectivity từ DB server (private subnet):**
+```bash
+# DB instance có thể truy cập internet qua NAT Gateway
+ping -c 4 8.8.8.8
+curl -I http://www.google.com
+```
+
+**Lưu ý**: DB instance có thể truy cập internet (outbound) nhưng vẫn không thể nhận kết nối từ internet (inbound) - vẫn giữ tính bảo mật.
+
 ## Xóa resources
 
 Để xóa tất cả resources đã tạo:
@@ -175,7 +207,9 @@ Dự án này đã được tối ưu cho testing/learning với các tính năn
 
 ### Ước tính chi phí (us-east-1)
 - **t2.micro**: ~$8.50/tháng mỗi instance (với tối ưu trên)
-- **Tổng 2 instances**: ~$17/tháng
+- **NAT Gateway**: ~$32/tháng + data transfer (~$0.045/GB)
+- **Elastic IP**: Miễn phí khi gắn với NAT Gateway
+- **Tổng ước tính**: ~$50-60/tháng (tùy data transfer)
 - **Lưu ý**: Chi phí có thể thay đổi theo region và thời gian sử dụng
 
 ### Tips tiết kiệm thêm
@@ -185,7 +219,9 @@ Dự án này đã được tối ưu cho testing/learning với các tính năn
 
 ## Lưu ý
 
-- **Chi phí**: EC2 instances sẽ tính phí khi chạy. Nhớ `terraform destroy` khi không dùng.
+- **Chi phí**: EC2 instances và NAT Gateway sẽ tính phí khi chạy. Nhớ `terraform destroy` khi không dùng.
+- **NAT Gateway**: Cho phép private subnet truy cập internet (outbound only), nhưng vẫn giữ tính bảo mật (không nhận inbound từ internet).
+- **Network ACLs**: Đã được cấu hình để cho phép return traffic từ internet qua NAT Gateway (ephemeral ports và ICMP).
 - **Key Pair**: Nếu không cung cấp `key_name`, bạn sẽ không thể SSH vào instances.
 - **Security**: Trong production, nên hạn chế SSH access từ 0.0.0.0/0, chỉ cho phép từ IP cụ thể.
 - **Testing**: DB instance đã được tối ưu cho testing với monitoring tắt và CPU credits standard.
