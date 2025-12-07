@@ -137,6 +137,18 @@ resource "aws_network_acl" "public" {
     action     = "allow"
   }
 
+  # Allow inbound ICMP (for ping)
+  ingress {
+    rule_no    = 150
+    protocol   = "icmp"
+    from_port  = 0
+    to_port    = 0
+    cidr_block = "0.0.0.0/0"
+    icmp_code  = -1
+    icmp_type  = -1
+    action     = "allow"
+  }
+
   # Allow all outbound
   egress {
     rule_no    = 100
@@ -185,13 +197,35 @@ resource "aws_network_acl" "private" {
     action     = "allow"
   }
 
-  # Allow inbound ephemeral ports
+  # Allow inbound ephemeral ports from VPC (for internal communication)
   ingress {
     rule_no    = 130
     protocol   = "tcp"
     from_port  = 1024
     to_port    = 65535
     cidr_block = var.vpc_cidr
+    action     = "allow"
+  }
+
+  # Allow inbound ephemeral ports from internet (for return traffic via NAT Gateway)
+  ingress {
+    rule_no    = 140
+    protocol   = "tcp"
+    from_port  = 1024
+    to_port    = 65535
+    cidr_block = "0.0.0.0/0"
+    action     = "allow"
+  }
+
+  # Allow inbound ICMP (for ping responses)
+  ingress {
+    rule_no    = 150
+    protocol   = "icmp"
+    from_port  = 0
+    to_port    = 0
+    cidr_block = "0.0.0.0/0"
+    icmp_code  = -1
+    icmp_type  = -1
     action     = "allow"
   }
 
