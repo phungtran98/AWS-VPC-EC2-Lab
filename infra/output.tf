@@ -79,3 +79,13 @@ output "private_db_key_file_path" {
   sensitive   = true
 }
 
+output "nat_gateway_id" {
+  description = "ID of the NAT Gateway"
+  value       = aws_nat_gateway.main-app-nat-gateway.id
+}
+
+output "nat_gateway_public_ip" {
+  description = "Public IP of the NAT Gateway"
+  value       = aws_eip.nat_gateway_eip.public_ip
+}
+
